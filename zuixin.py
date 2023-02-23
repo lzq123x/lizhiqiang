@@ -6,128 +6,87 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GridSearchCV
 import os.path
 import time
+import configparser
 
-# Set number of days to retrieve from API
-num_days = 30
 
-# Set lottery type and API URL
-lottery_type = 'bjpk10'
-url = f'https://www.1680263.com/api/pks/getPksHistoryList.do?lotCode=10058'
+def get_data():
+    # read configuration file
+    config = configparser.ConfigParser()
+    config.read('config.ini')
 
-# Calculate start and end dates
-end_date = datetime.now().strftime('%Y-%m-%d')
-start_date = (datetime.now() - timedelta(days=num_days)).strftime('%Y-%m-%d')
+    url = config['default']['url']
+    num_days = int(config['default']['num_days'])
+    history_dir = config['default']['history_dir']
+    prediction_dir = config['default']['prediction_dir']
+    model_path = config['default']['model_path']
 
-# Fetch data from API or local file
-data_file_name = 'lottery_data.json'
-if os.path.isfile(data_file_name):
-    with open(data_file_name) as json_file:
-        full_data = json.load(json_file)
-else:
-    full_data = []
-for i in range(num_days):
-    date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-    if not any(d['preDrawIssue'] == date for d in full_data):
-        response = requests.get(url + f'&date={date}')
-        if response.status_code == 200:
-            data = response.json()
-            full_data += data['result']['data']
+    # get date range to retrieve data
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=num_days)).strftime("%Y-%m-%d")
+
+    # check if data has been previously retrieved
+    history_file = os.path.join(history_dir, f"data_{start_date}_{end_date}.json")
+    if os.path.exists(history_file):
+        with open(history_file, 'r') as f:
+            data = json.load(f)
+    else:
+        # retrieve data from API
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                          'Chrome/58.0.3029.110 Safari/537.36 Edge/16.16299 '
+        }
+        params = {
+            'start_date': start_date,
+            'end_date': end_date
+        }
+        response = requests.get(url, headers=headers, params=params)
+        data = response.json()
+
+        # save retrieved data to history file
+        with open(history_file, 'w') as f:
+            json.dump(data, f)
+
+    # process data
+    values = np.array(data['data'])
+    dates = np.array(data['labels'])
+    dates = np.array([datetime.strptime(d, '%Y-%m-%d') for d in dates])
+
+    # train model if not already trained
+    if os.path.exists(model_path):
+        # load model
+        clf = MLPClassifier()
+        clf = clf.partial_fit([values[-1]], [predict_class(values[-1])], classes=[0, 1])
+    else:
+        # train model
+        parameters = {
+            'hidden_layer_sizes': [(50,), (100,), (50, 50), (100, 100)],
+            'activation': ['tanh', 'relu'],
+            'solver': ['sgd', 'adam'],
+            'alpha': [0.0001, 0.001, 0.01],
+            'learning_rate': ['constant', 'adaptive'],
+        }
+        clf = GridSearchCV(MLPClassifier(), parameters, n_jobs=-1)
+        clf.fit(values, predict_class(values))
+        clf = clf.best_estimator_
+        clf.partial_fit([values[-1]], [predict_class(values[-1])], classes=[0, 1])
+
+        # save model to file
+        if not os.path.exists(model_file):
+            clf.fit(X_train, y_train)
+            with open(model_file, 'wb') as f:
+            pickle.dump(clf, f)
+
+        # load model from file
+        with open(model_file, 'rb') as f:
+            clf = pickle.load(f)
+
+        # predict
+        X_today = np.array(today_data).reshape(1, -1)
+        result = clf.predict(X_today)
+
+        # output result
+        if result == 1:
+            print(today_str, "今日中奖！")
         else:
-            print("无法获取数据。")
-            exit()
-
-# Extract past draw codes and issue numbers
-pre_draw_code_list = []
-pre_draw_issue_list = []
-for item in reversed(full_data):
-    pre_draw_code_list.append(item['preDrawCode'])
-    pre_draw_issue_list.append(item['preDrawIssue'])
-
-# Convert codes to numpy array for processing
-np_pre_draw_codes = np.array([list(map(int, x.split(','))) for x in pre_draw_code_list])
-
-# Extract additional features
-np_new_features = []
-for i in range(np_pre_draw_codes.shape[0]):
-    row = np_pre_draw_codes[i]
-    parity = np.sum(row % 2 == 0)
-    size = np.sum(row > 5)
-    s = np.sum(row)
-    span = np.max(row) - np.min(row)
-    np_new_features.append([parity, size, s, span])
-
-# Print shapes of np_pre_draw_codes and np_new_features
-print(np_pre_draw_codes.shape, np.array(np_new_features).shape)
-
-np_new_features = np.array(np_new_features[1:])
-if np_pre_draw_codes.shape[0] - np_new_features.shape[0] == 1:
-    np_pre_draw_codes = np_pre_draw_codes[:-1]
-np_X = np.concatenate((np_pre_draw_codes[:-1], np_new_features[:-1]), axis=1)
-np_y = np_pre_draw_codes[1:, 0]
-
-# Train MLPClassifier model using GPU
-parameters = {'hidden_layer_sizes': [(100,), (200,), (300,)], 'solver': ['adam'], 'batch_size': [32, 64, 128], 'learning_rate_init': [0.01, 0.001]}
-cv = GridSearchCV(MLPClassifier(max_iter=500), parameters, cv=5, n_jobs=-1, verbose=1)
-start_time = time.time()
-cv.fit(np_X, np_y)
-end_time = time.time()
-
-# Predict next draw's first number and print probabilities of top 5 numbers
-next_draw = np.concatenate((np_pre_draw_codes[-1], np_new_features[-1]), axis=0).reshape(1, -1)
-prediction = cv.predict(next_draw)
-probas = cv.predict_proba(next_draw)[0]
-pred_num_index = np.argsort(probas)[-5:][::-1]
-pred_num_prob = probas[pred_num_index]
-for i, (index, p) in enumerate(zip(pred_num_index, pred_num_prob)):
-    print("第{}预测数字{}的概率：{:.2f}%".format(i+1, index+1, p*100))
-
-# Improve prediction by checking if predicted number matches recent history
-pred_num = int(np.argmax(probas)) + 1
-for i in range(2, 6):
-    if np_pre_draw_codes[-i, 0] == pred_num:
-        pred_num_index = np.argsort(probas[1:])[-4:][::-1]
-        pred_num = pred_num_index[0] + 2
-        break
-
-results = []
-for i, (index, p) in enumerate(zip(pred_num_index, probas[pred_num_index])):
-    results.append((index+1, p*100))
-
-print("Prediction for issue {}:".format(pre_draw_issue_list[-1]+1))
-for i, (num, prob) in enumerate(results):
-    print("Rank {}: Number {}, Probability {:.2f}%".format(i+1, num, prob))
-
-# Cross-validate MLPClassifier model using GPU
-from sklearn.model_selection import cross_val_score
-scores = cross_val_score(cv.best_estimator_, np_X, np_y, cv=5)
-print("Cross-validation scores: ", scores)
-
-# Check if predicted number matches recent history
-pred_num = num
-for i in range(2, 6):
-    if np_pre_draw_codes[-i, 0] == pred_num:
-        pred_num_index = np.argsort(probas[1:])[-4:][::-1]
-        pred_num = pred_num_index[0] + 2
-        break
-
-# Print the final prediction
-results = []
-for i, index in enumerate(np.argsort(probas)[-7:][::-1]):
-    prob = probas[index]
-    results.append((index+1, prob*100))
-
-print("Final prediction:")
-for i, (num, prob) in enumerate(results):
-    print("Rank {}: Number {}, Probability {:.2f}%".format(i+1, num, prob))
-# Fetch latest draw data from API
-response = requests.get(url)
-if response.status_code == 200:
-    data = response.json()
-    latest_draw = list(map(int, data['result']['data'][0]['preDrawCode'].split(',')))
-else:
-    print("无法获取数据。")
-    exit()
-
-# Print latest draw
-print("最新开奖：", latest_draw)
+            print(today_str, "今日无中奖")
 
