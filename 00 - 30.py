@@ -41,21 +41,21 @@ start_date = datetime.date(2023, 1, 1)
 end_date = datetime.date(2023, 3, 1)
 date_list = [(start_date + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range((end_date - start_date).days + 1)]
 
-    # 计算每个号码的出现次数
-    for date in date_list:
-        full_data = fetch_data(lot_code, date, data_dir)
-        for record in full_data:
-            nums = record['preDrawCode'].split(',')
-            for num in nums:
-                data.loc[record['preDrawIssue'], f"num_{num}"] = 1
+# 计算每个号码的出现次数
+for date in date_list:
+    full_data = fetch_data(lot_code, date, data_dir)
+    for record in full_data:
+        nums = record['preDrawCode'].split(',')
+        for num in nums:
+            data.loc[record['preDrawIssue'], f"num_{num}"] = 1
 
-    # 计算最近 5 期、10 期和 20 期内的平均出现次数
-    for i in range(1, 36):
-        data[f"rolling_mean_5_{i}"] = data[f"num_{i}"].rolling(window=5).mean()
-        data[f"rolling_mean_10_{i}"] = data[f"num_{i}"].rolling(window=10).mean()
-        data[f"rolling_mean_20_{i}"] = data[f"num_{i}"].rolling(window=20).mean()
+# 计算最近 5 期、10 期和 20 期内的平均出现次数
+for i in range(1, 36):
+    data[f"rolling_mean_5_{i}"] = data[f"num_{i}"].rolling(window=5).mean()
+    data[f"rolling_mean_10_{i}"] = data[f"num_{i}"].rolling(window=10).mean()
+    data[f"rolling_mean_20_{i}"] = data[f"num_{i}"].rolling(window=20).mean()
 
-    data.dropna(inplace=True)  # 删除包含 NaN 的行
+data.dropna(inplace=True)  # 删除包含 NaN 的行
 
 def load_data(data_dir, date):
     with open(data_dir + date + '.json') as json_file:
