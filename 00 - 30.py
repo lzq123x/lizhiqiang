@@ -220,8 +220,10 @@ def main():
     delete_today_data(data_dir + datetime.now().strftime('%Y-%m-%d') + '.json')
     start_date, end_date = get_dates(num_days)
     date_list = generate_date_list(start_date, end_date)
-    full_data = check_and_fetch_data(lot_code, date_list, data_dir)
-    X_train, X_test, y_train, y_test, np_X_scaled, np_y, np_y_one_hot = preprocess_data(full_data)
+
+    for date in date_list:
+        full_data = fetch_data(lot_code, date, data_dir)
+        # 对full_data进行预处理和分析
     
     # 交叉验证部分
     kf = StratifiedKFold(n_splits=5)
