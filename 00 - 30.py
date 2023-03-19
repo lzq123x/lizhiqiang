@@ -33,6 +33,15 @@ def fetch_data(lot_code, date, data_dir):
         print("无法获取数据。")
         exit()
 
+# 计算最近 5 期、10 期和 20 期内的平均出现次数
+    for i in range(1, 36):
+        data[f"rolling_mean_5_{i}"] = data[f"num_{i}"].rolling(window=5).mean()
+        data[f"rolling_mean_10_{i}"] = data[f"num_{i}"].rolling(window=10).mean()
+        data[f"rolling_mean_20_{i}"] = data[f"num_{i}"].rolling(window=20).mean()
+
+    data.dropna(inplace=True)  # 删除包含 NaN 的行
+
+
 def load_data(data_dir, date):
     with open(data_dir + date + '.json') as json_file:
         full_data = json.load(json_file)
@@ -43,6 +52,12 @@ def delete_today_data(today_file):
         os.remove(today_file)
     else:
         print("今天的 JSON 文件不存在，不需要删除。")
+    X = data.drop(["winning_numbers"], axis=1).values
+    y = data["winning_numbers"].values
+
+    encoder = OneHotEncoder(sparse=False)
+    y = encoder.fit_transform(y.reshape(-1, 1))
+
 
 def get_dates(num_days):
     end_date = datetime.now().strftime('%Y-%m-%d')
@@ -184,7 +199,7 @@ def build_and_train_model(X_train, X_test, y_train, y_test):
 
 def main():
     lot_code = 10012
-    num_days = 30
+    num_days = 1
     data_dir = './lishiwenjian/'
 
     delete_today_data(data_dir + datetime.now().strftime('%Y-%m-%d') + '.json')
