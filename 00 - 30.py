@@ -1,7 +1,9 @@
 import os
 import json
 import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
+import datetime
 import requests
 import logging
 from sklearn.preprocessing import MinMaxScaler
@@ -32,15 +34,28 @@ def fetch_data(lot_code, date, data_dir):
     else:
         print("无法获取数据。")
         exit()
+columns = ['period'] + [f'num_{i}' for i in range(1, 36)]
+data = pd.DataFrame(columns=columns)
 
-# 计算最近 5 期、10 期和 20 期内的平均出现次数
+start_date = datetime.date(2023, 1, 1)
+end_date = datetime.date(2023, 3, 1)
+date_list = [(start_date + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range((end_date - start_date).days + 1)]
+
+    # 计算每个号码的出现次数
+    for date in date_list:
+        full_data = fetch_data(lot_code, date, data_dir)
+        for record in full_data:
+            nums = record['preDrawCode'].split(',')
+            for num in nums:
+                data.loc[record['preDrawIssue'], f"num_{num}"] = 1
+
+    # 计算最近 5 期、10 期和 20 期内的平均出现次数
     for i in range(1, 36):
         data[f"rolling_mean_5_{i}"] = data[f"num_{i}"].rolling(window=5).mean()
         data[f"rolling_mean_10_{i}"] = data[f"num_{i}"].rolling(window=10).mean()
         data[f"rolling_mean_20_{i}"] = data[f"num_{i}"].rolling(window=20).mean()
 
     data.dropna(inplace=True)  # 删除包含 NaN 的行
-
 
 def load_data(data_dir, date):
     with open(data_dir + date + '.json') as json_file:
@@ -204,7 +219,8 @@ def main():
 
     delete_today_data(data_dir + datetime.now().strftime('%Y-%m-%d') + '.json')
     start_date, end_date = get_dates(num_days)
-    full_data = check_and_fetch_data(lot_code, num_days + 1, data_dir)
+    date_list = generate_date_list(start_date, end_date)
+    full_data = check_and_fetch_data(lot_code, date_list, data_dir)
     X_train, X_test, y_train, y_test, np_X_scaled, np_y, np_y_one_hot = preprocess_data(full_data)
     
     # 交叉验证部分
