@@ -3,7 +3,6 @@ import json
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-import datetime
 import requests
 import logging
 from sklearn.preprocessing import MinMaxScaler
@@ -37,25 +36,33 @@ def fetch_data(lot_code, date, data_dir):
 columns = ['period'] + [f'num_{i}' for i in range(1, 36)]
 data = pd.DataFrame(columns=columns)
 
-start_date = datetime.date(2023, 1, 1)
-end_date = datetime.date(2023, 3, 1)
-date_list = [(start_date + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range((end_date - start_date).days + 1)]
+def generate_date_list(start_date, end_date):
+    date_list = []
+    while start_date < end_date:
+        date_list.append(start_date.strftime('%Y-%m-%d'))
+        start_date += timedelta(days=1)
+    return date_list
 
-# 计算每个号码的出现次数
-for date in date_list:
-    full_data = fetch_data(lot_code, date, data_dir)
-    for record in full_data:
-        nums = record['preDrawCode'].split(',')
-        for num in nums:
-            data.loc[record['preDrawIssue'], f"num_{num}"] = 1
+start_date = datetime(2023, 1, 1)
+end_date = datetime(2023, 1, 8)
+date_list = generate_date_list(start_date, end_date)
 
-# 计算最近 5 期、10 期和 20 期内的平均出现次数
-for i in range(1, 36):
-    data[f"rolling_mean_5_{i}"] = data[f"num_{i}"].rolling(window=5).mean()
-    data[f"rolling_mean_10_{i}"] = data[f"num_{i}"].rolling(window=10).mean()
-    data[f"rolling_mean_20_{i}"] = data[f"num_{i}"].rolling(window=20).mean()
+def process_data(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data_list = json.load(f)
 
-data.dropna(inplace=True)  # 删除包含 NaN 的行
+    data = pd.DataFrame.from_records(data_list)
+    
+    # 修改列名，以匹配原始列名
+    data = data.rename(columns={"preDrawCode": "winning_numbers"})
+
+    X = data.drop(["winning_numbers"], axis=1).values
+    y = data["winning_numbers"].values
+
+    encoder = OneHotEncoder(sparse=False)
+    y = encoder.fit_transform(y.reshape(-1, 1))
+
+    return X, y
 
 def load_data(data_dir, date):
     with open(data_dir + date + '.json') as json_file:
@@ -220,6 +227,22 @@ def main():
     delete_today_data(data_dir + datetime.now().strftime('%Y-%m-%d') + '.json')
     start_date, end_date = get_dates(num_days)
     date_list = generate_date_list(start_date, end_date)
+
+    # 计算每个号码的出现次数
+    for date in date_list:
+        full_data = fetch_data(lot_code, date, data_dir)
+        for record in full_data:
+            nums = record['preDrawCode'].split(',')
+            for num in nums:
+                data.loc[record['preDrawIssue'], f"num_{num}"] = 1
+
+    # 计算最近 5 期、10 期和 20 期内的平均出现次数
+    for i in range(1, 36):
+        data[f"rolling_mean_5_{i}"] = data[f"num_{i}"].rolling(window=5).mean()
+        data[f"rolling_mean_10_{i}"] = data[f"num_{i}"].rolling(window=10).mean()
+        data[f"rolling_mean_20_{i}"] = data[f"num_{i}"].rolling(window=20).mean()
+
+    data.dropna(inplace=True)  # 删除包含 NaN 的行
 
     for date in date_list:
         full_data = fetch_data(lot_code, date, data_dir)
